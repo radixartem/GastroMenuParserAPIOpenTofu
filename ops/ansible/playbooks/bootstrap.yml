@@ -1,0 +1,234 @@
+---
+- name: Configure Gastro API production host
+  hosts: all
+  become: true
+  gather_facts: true
+  vars:
+    deploy_user: "{{ deploy_user | default('deploy') }}"
+    app_dir: /opt/gastro-api
+    postgres_data_dir: /srv/gastro/postgres
+    postgres_volume_device: "{{ lookup('env', 'POSTGRES_VOLUME_DEVICE') | default('', true) }}"
+    format_postgres_volume: false
+    configure_ssh_hardening: true
+  pre_tasks:
+    - name: Require Ubuntu 26.04
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == 'Ubuntu'
+          - ansible_distribution_version is version('26.04', '>=')
+        fail_msg: "This playbook targets Ubuntu 26.04+; detected {{ ansible_distribution }} {{ ansible_distribution_version }}."
+
+    - name: Install bootstrap packages
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - git
+          - rsync
+          - fail2ban
+          - ufw
+          - unattended-upgrades
+          - awscli
+          - python3
+        state: present
+        update_cache: true
+
+  tasks:
+    - name: Remove conflicting Docker packages
+      ansible.builtin.apt:
+        name:
+          - docker.io
+          - docker-compose
+          - docker-doc
+          - podman-docker
+          - containerd
+          - runc
+        state: absent
+
+    - name: Install Docker repository keyring directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Download Docker signing key
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: '0644'
+        force: true
+
+    - name: Configure official Docker repository
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/docker.sources
+        mode: '0644'
+        content: |
+          Types: deb
+          URIs: https://download.docker.com/linux/ubuntu
+          Suites: {{ ansible_distribution_release }}
+          Components: stable
+          Architectures: {{ ansible_architecture | regex_replace('x86_64', 'amd64') | regex_replace('aarch64', 'arm64') }}
+          Signed-By: /etc/apt/keyrings/docker.asc
+      register: docker_repo
+
+    - name: Install Docker Engine and Compose V2
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+        update_cache: true
+
+    - name: Create deploy user
+      ansible.builtin.user:
+        name: "{{ deploy_user }}"
+        groups: docker
+        append: true
+        shell: /bin/bash
+        create_home: true
+
+    - name: Ensure Docker is enabled
+      ansible.builtin.systemd:
+        name: docker
+        enabled: true
+        state: started
+
+    - name: Create application directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+        mode: '0755'
+      loop:
+        - "{{ app_dir }}"
+        - "{{ app_dir }}/caddy"
+        - "{{ app_dir }}/ops"
+        - "{{ app_dir }}/ops/backups"
+        - "{{ postgres_data_dir }}"
+
+    - name: Check configured PostgreSQL volume device
+      ansible.builtin.stat:
+        path: "{{ postgres_volume_device }}"
+      register: postgres_device
+      when: postgres_volume_device | length > 0
+
+    - name: Refuse to format PostgreSQL volume by default
+      ansible.builtin.fail:
+        msg: "POSTGRES_VOLUME_DEVICE was supplied, but format_postgres_volume is false. Set it to true only for a known-empty volume."
+      when:
+        - postgres_volume_device | length > 0
+        - format_postgres_volume | bool
+        - not postgres_device.stat.exists
+
+    - name: Create filesystem on explicitly approved empty volume
+      community.general.filesystem:
+        fstype: ext4
+        dev: "{{ postgres_volume_device }}"
+      when:
+        - postgres_volume_device | length > 0
+        - format_postgres_volume | bool
+
+    - name: Mount PostgreSQL volume
+      ansible.posix.mount:
+        path: "{{ postgres_data_dir }}"
+        src: "{{ postgres_volume_device }}"
+        fstype: ext4
+        opts: defaults,noatime
+        state: mounted
+      when: postgres_volume_device | length > 0
+
+    - name: Determine PostgreSQL container UID/GID
+      ansible.builtin.shell: |
+        docker run --rm --entrypoint sh postgres:16-alpine -c 'printf "%s:%s" "$(id -u postgres)" "$(id -g postgres)"'
+      register: postgres_uid_gid
+      changed_when: false
+
+    - name: Prepare PostgreSQL data directory for postgres container
+      ansible.builtin.file:
+        path: "{{ postgres_data_dir }}"
+        owner: "{{ postgres_uid_gid.stdout.split(':')[0] }}"
+        group: "{{ postgres_uid_gid.stdout.split(':')[1] }}"
+        mode: '0700'
+
+    - name: Configure UFW
+      community.general.ufw:
+        state: enabled
+        policy: deny
+        direction: incoming
+
+    - name: Allow SSH
+      community.general.ufw:
+        rule: allow
+        port: '22'
+        proto: tcp
+
+    - name: Allow HTTP
+      community.general.ufw:
+        rule: allow
+        port: '80'
+        proto: tcp
+
+    - name: Allow HTTPS
+      community.general.ufw:
+        rule: allow
+        port: '443'
+        proto: tcp
+
+    - name: Configure fail2ban
+      ansible.builtin.copy:
+        dest: /etc/fail2ban/jail.local
+        mode: '0644'
+        content: |
+          [sshd]
+          enabled = true
+          port = ssh
+          maxretry = 5
+          bantime = 1h
+          findtime = 10m
+      notify: Restart fail2ban
+
+    - name: Configure automatic security updates
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/20auto-upgrades
+        mode: '0644'
+        content: |
+          APT::Periodic::Update-Package-Lists "1";
+          APT::Periodic::Unattended-Upgrade "1";
+
+    - name: Set Docker log rotation
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        mode: '0644'
+        content: |
+          {
+            "log-driver": "json-file",
+            "log-opts": {
+              "max-size": "10m",
+              "max-file": "5"
+            }
+          }
+      notify: Restart docker
+
+    - name: Set application directory ownership
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+        recurse: false
+
+  handlers:
+    - name: Restart docker
+      ansible.builtin.systemd:
+        name: docker
+        state: restarted
+
+    - name: Restart fail2ban
+      ansible.builtin.systemd:
+        name: fail2ban
+        enabled: true
+        state: restarted

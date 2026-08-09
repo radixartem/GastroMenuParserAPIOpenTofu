@@ -1,0 +1,25 @@
+---
+- name: Install Gastro deployment files
+  hosts: all
+  become: true
+  vars:
+    deploy_user: "{{ deploy_user | default('deploy') }}"
+    app_dir: /opt/gastro-api
+  tasks:
+    - name: Copy deployment bundle
+      ansible.posix.synchronize:
+        src: "{{ playbook_dir }}/../../../"
+        dest: "{{ app_dir }}/"
+        delete: false
+        rsync_opts:
+          - "--exclude=.git"
+          - "--exclude=.env"
+          - "--exclude=terraform/.terraform"
+      delegate_to: localhost
+
+    - name: Fix deployment ownership
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+        recurse: true

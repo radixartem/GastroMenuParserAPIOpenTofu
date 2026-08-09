@@ -1,0 +1,3 @@
+# Local-only overrides are intentionally empty.
+# Use docker-compose.dev.yml for development.
+services: {}

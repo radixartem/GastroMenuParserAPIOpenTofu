@@ -1,0 +1,41 @@
+name: Infrastructure Plan
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ['terraform/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: terraform/live/production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+      - name: Configure backend credentials
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.OBJ_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.OBJ_SECRET_KEY }}
+        run: |
+          cat > backend.hcl <<EOF
+          bucket = "gastro-api-terraform-state"
+          key = "production/terraform.tfstate"
+          region = "fsn1"
+          endpoint = "${{ secrets.OBJ_ENDPOINT }}"
+          EOF
+          terraform init -backend-config=backend.hcl
+      - name: Validate
+        run: terraform validate
+      - name: Plan
+        env:
+          TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+        run: terraform plan -var="existing_server_id=${{ secrets.PROD_SERVER_ID }}" -var="existing_firewall_id=${{ secrets.PROD_FIREWALL_ID }}" -var="existing_volume_id=${{ secrets.PROD_VOLUME_ID }}"

@@ -1,0 +1,7 @@
+# Existing Hetzner resources. Terraform does NOT create or destroy the production server.
+hcloud_token = "REPLACE_ME"
+existing_server_id = 12345678
+existing_firewall_id = 12345678
+existing_volume_id = 12345678
+project_name = "gastro"
+environment = "production"

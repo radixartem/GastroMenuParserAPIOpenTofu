@@ -1,0 +1,4 @@
+bucket = "gastro-api-terraform-state"
+key = "dev/terraform.tfstate"
+region = "fsn1"
+endpoint = "https://fsn1.your-objectstorage.com"

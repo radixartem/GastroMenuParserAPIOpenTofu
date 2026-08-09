@@ -1,0 +1,2 @@
+hcloud_token = "REPLACE_ME"
+existing_server_id = 12345678

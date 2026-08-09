@@ -1,0 +1,8 @@
+[Unit]
+Description=Gastro API PostgreSQL backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gastro-api/ops/backups/backup.sh

@@ -1,0 +1,113 @@
+name: Deploy Production
+
+on:
+  workflow_run:
+    workflows: [Build]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'GHCR image tag (commit SHA or latest)'
+        required: true
+        default: 'latest'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      SERVER_HOST: ${{ secrets.PROD_SERVER_IP }}
+      DEPLOY_USER: ${{ secrets.PROD_DEPLOY_USER }}
+      VERSION: ${{ github.event.inputs.version || github.event.workflow_run.head_sha }}
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/gastromenuparserapi
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          if [ -n "$KNOWN_HOSTS" ]; then printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts; else ssh-keyscan -H "$SERVER_HOST" >> ~/.ssh/known_hosts; fi
+
+      - name: Upload runtime files
+        run: |
+          tar czf /tmp/gastro-deploy.tgz docker-compose.yml docker-compose.monitoring.yml caddy ops/monitoring ops/backups ops/systemd
+          scp /tmp/gastro-deploy.tgz "$DEPLOY_USER@$SERVER_HOST:/tmp/gastro-deploy.tgz"
+
+      - name: Deploy
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.PROD_POSTGRES_PASSWORD }}
+          GRAFANA_PASSWORD: ${{ secrets.PROD_GRAFANA_PASSWORD }}
+          IMPORT_API_KEY: ${{ secrets.PROD_IMPORT_API_KEY }}
+          OBJ_ACCESS_KEY: ${{ secrets.OBJ_ACCESS_KEY }}
+          OBJ_SECRET_KEY: ${{ secrets.OBJ_SECRET_KEY }}
+          OBJ_ENDPOINT: ${{ secrets.OBJ_ENDPOINT }}
+          OBJ_BUCKET: ${{ secrets.OBJ_BUCKET }}
+          ACME_EMAIL: ${{ secrets.ACME_EMAIL }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+        run: |
+          umask 077
+          cat > /tmp/gastro.env <<EOF
+          IMAGE_NAME=$IMAGE_NAME
+          VERSION=$VERSION
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+          POSTGRES_DB=gastro_menu
+          POSTGRES_DATA_DIR=/srv/gastro/postgres
+          DB_CONNECTION_STRING=Host=postgres;Database=gastro_menu;Username=postgres;Password=$POSTGRES_PASSWORD
+          APPLY_MIGRATIONS=true
+          IMPORT_API_KEY=$IMPORT_API_KEY
+          GRAFANA_ADMIN_USER=admin
+          GRAFANA_ADMIN_PASSWORD=$GRAFANA_PASSWORD
+          OBJ_ACCESS_KEY=$OBJ_ACCESS_KEY
+          OBJ_SECRET_KEY=$OBJ_SECRET_KEY
+          OBJ_ENDPOINT=$OBJ_ENDPOINT
+          OBJ_BUCKET=$OBJ_BUCKET
+          OBJ_REGION=fsn1
+          BACKUP_RETENTION_DAYS=14
+          ACME_EMAIL=$ACME_EMAIL
+          EOF
+          scp /tmp/gastro.env "$DEPLOY_USER@$SERVER_HOST:/tmp/gastro.env"
+
+          ssh "$DEPLOY_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          sudo install -d -m 0755 /opt/gastro-api /opt/gastro-api/caddy /etc/gastro-api
+          sudo tar xzf /tmp/gastro-deploy.tgz -C /opt/gastro-api
+          sudo install -m 0600 /tmp/gastro.env /opt/gastro-api/.env
+          sudo chown -R "$USER":"$USER" /opt/gastro-api
+          rm -f /tmp/gastro-deploy.tgz /tmp/gastro.env
+          REMOTE
+
+          printf '%s' "$GHCR_TOKEN" | ssh "$DEPLOY_USER@$SERVER_HOST" "docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
+          ssh "$DEPLOY_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          if docker inspect gastro-postgres >/dev/null 2>&1; then
+            mkdir -p /srv/gastro/postgres
+            if [ -z "$(ls -A /srv/gastro/postgres 2>/dev/null || true)" ]; then
+              echo "Existing gastro-postgres container detected but /srv/gastro/postgres is empty." >&2
+              echo "Refusing deployment to avoid silently replacing an existing database. Migrate the existing Docker volume first." >&2
+              exit 1
+            fi
+          fi
+          cd /opt/gastro-api
+          docker compose --env-file .env pull
+          docker compose --env-file .env up -d --remove-orphans
+          docker compose --env-file .env -f docker-compose.monitoring.yml pull
+          docker compose --env-file .env -f docker-compose.monitoring.yml up -d --remove-orphans
+          REMOTE
+          ssh "$DEPLOY_USER@$SERVER_HOST" "sudo install -m 0755 /opt/gastro-api/ops/backups/backup.sh /usr/local/bin/gastro-backup && sudo install -m 0755 /opt/gastro-api/ops/scripts/install-systemd.sh /usr/local/bin/gastro-install-systemd && sudo /usr/local/bin/gastro-install-systemd"
+          ssh "$DEPLOY_USER@$SERVER_HOST" "cd /opt/gastro-api && docker compose --env-file .env ps"

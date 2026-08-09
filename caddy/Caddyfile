@@ -1,0 +1,21 @@
+{
+    admin off
+    email {$ACME_EMAIL}
+}
+
+gastro.opik.net {
+    encode zstd gzip
+
+    @metrics path /metrics*
+    respond @metrics 404
+
+    @internalHealth path /health*
+    respond @internalHealth 404
+
+    reverse_proxy api:8080
+
+    log {
+        output stdout
+        format json
+    }
+}
