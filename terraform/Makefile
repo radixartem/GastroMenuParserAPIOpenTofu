@@ -1,19 +1,19 @@
-ENV ?= production
-TF_DIR := live/$(ENV)
+TOFU := tofu
+DIR  := live/production
 
-.PHONY: init fmt validate plan apply
-
-init:
-	cd $(TF_DIR) && terraform init -backend-config=backend.hcl
+.PHONY: fmt init validate plan apply
 
 fmt:
-	terraform fmt -recursive
+	$(TOFU) fmt -recursive
+
+init:
+	cd $(DIR) && $(TOFU) init -backend-config=backend.hcl
 
 validate:
-	cd $(TF_DIR) && terraform validate
+	cd $(DIR) && $(TOFU) validate
 
 plan:
-	cd $(TF_DIR) && terraform plan
+	cd $(DIR) && $(TOFU) plan
 
 apply:
-	cd $(TF_DIR) && terraform apply
+	cd $(DIR) && $(TOFU) apply

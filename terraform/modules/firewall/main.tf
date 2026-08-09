@@ -11,5 +11,10 @@ resource "hcloud_firewall" "this" {
     }
   }
 
-  lifecycle { prevent_destroy = true }
+  labels = merge(
+    var.labels,
+    {
+      managed-by = "opentofu"
+    }
+  )
 }

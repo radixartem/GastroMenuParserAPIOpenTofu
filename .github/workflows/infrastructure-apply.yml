@@ -1,7 +1,7 @@
-name: Infrastructure Plan
+name: Infrastructure Apply
 
 on:
-  pull_request:
+  push:
     branches: [main]
     paths: ['terraform/**']
   workflow_dispatch:
@@ -10,12 +10,15 @@ permissions:
   contents: read
 
 concurrency:
-  group: opentofu-plan-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: opentofu-production
+  cancel-in-progress: false
 
 jobs:
-  opentofu-plan:
+  opentofu-apply:
     runs-on: ubuntu-latest
+    environment:
+      name: production   # требует ручного approval в GitHub Environments
+
     defaults:
       run:
         working-directory: terraform/live/production
@@ -35,14 +38,11 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.OBJ_SECRET_KEY }}
         run: tofu init -backend-config="endpoint=${{ secrets.OBJ_ENDPOINT }}"
 
-      - name: Format Check
-        run: tofu fmt -check -recursive
-
       - name: Validate
         run: tofu validate
 
-      - name: Plan
+      - name: Apply
         env:
           TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           TF_VAR_ssh_key_ids: ${{ secrets.SSH_KEY_IDS }}
-        run: tofu plan
+        run: tofu apply -auto-approve

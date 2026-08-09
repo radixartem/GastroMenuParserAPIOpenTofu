@@ -1,28 +1,80 @@
 variable "hcloud_token" {
-  type      = string
-  sensitive = true
+  description = "Hetzner Cloud API token"
+  type        = string
+  sensitive   = true
 }
 
-variable "existing_server_id" {
-  type        = number
-  description = "Existing Hetzner Cloud server ID. Terraform reads it but does not manage or destroy the server."
+variable "ssh_key_ids" {
+  description = "List of SSH key IDs"
+  type        = list(number)
 }
 
-variable "existing_firewall_id" {
-  type        = number
-  default     = null
-  description = "Optional existing Hetzner Firewall ID."
+variable "servers" {
+  description = "Server configurations"
+  type = map(object({
+    server_name = string
+    server_type = string
+    image       = string
+    location    = string
+    volume_role = optional(string, null)   # "postgres" – к этому серверу подключается PostgreSQL-том
+  }))
+  default = {}
 }
 
-variable "existing_volume_id" {
-  type        = number
-  default     = null
-  description = "Optional existing Hetzner Volume ID used for PostgreSQL."
-}
-
-variable "project_name" {
+variable "firewall_name" {
   type    = string
-  default = "gastro"
+  default = "gastro-prod-firewall"
+}
+
+variable "firewall_rules" {
+  description = "Firewall rules"
+  type = list(object({
+    direction  = string
+    protocol   = string
+    port       = string
+    source_ips = list(string)
+  }))
+  default = [
+    {
+      direction  = "in"
+      protocol   = "tcp"
+      port       = "22"
+      source_ips = ["0.0.0.0/0"]
+    },
+    {
+      direction  = "in"
+      protocol   = "tcp"
+      port       = "80"
+      source_ips = ["0.0.0.0/0"]
+    },
+    {
+      direction  = "in"
+      protocol   = "tcp"
+      port       = "443"
+      source_ips = ["0.0.0.0/0"]
+    }
+  ]
+}
+
+variable "volume_name" {
+  type    = string
+  default = "gastro-postgres-data"
+}
+
+variable "volume_size" {
+  type    = number
+  default = 20
+}
+
+variable "postgres_server" {
+  description = "Ключ сервера в var.servers, к которому подключается PostgreSQL-том"
+  type        = string
+  default     = "gastro-prod"
+
+  validation {
+    condition     = contains(keys(var.servers), var.postgres_server)
+    error_message = "postgres_server должен быть одним из ключей var.servers."
+  }
 }
 
 variable "environment" {

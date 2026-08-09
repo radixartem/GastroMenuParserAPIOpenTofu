@@ -1,7 +1,18 @@
-# Existing Hetzner resources. Terraform does NOT create or destroy the production server.
-hcloud_token = "REPLACE_ME"
-existing_server_id = 12345678
-existing_firewall_id = 12345678
-existing_volume_id = 12345678
-project_name = "gastro"
-environment = "production"
+hcloud_token = "<your-api-token>"
+ssh_key_ids  = [123456]
+
+servers = {
+  gastro-prod = {
+    server_name = "gastro-prod"
+    server_type = "cx22"
+    image       = "ubuntu-26.04"
+    location    = "fsn1"
+    volume_role = "postgres"
+  }
+}
+
+# Для импорта существующих ресурсов (однократно)
+# existing_server_id   = 111111
+# existing_firewall_id = 222222
+# existing_volume_id   = 333333
+

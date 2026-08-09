@@ -1,24 +1,18 @@
-output "server_id" {
-  value = data.hcloud_server.production.id
-}
-
-output "server_name" {
-  value = data.hcloud_server.production.name
-}
-
-output "server_ipv4" {
-  value = data.hcloud_server.production.ipv4_address
-}
-
-output "server_location" {
-  value = data.hcloud_server.production.location
+output "servers" {
+  description = "Provisioned servers with IPs"
+  value = {
+    for name, server in module.server :
+    name => {
+      id   = server.server_id
+      ipv4 = server.ipv4_address
+    }
+  }
 }
 
 output "firewall_id" {
-  value = var.existing_firewall_id
+  value = module.firewall["production"].firewall_id
 }
 
-output "postgres_volume_id" {
-  value     = var.existing_volume_id
-  sensitive = true
+output "volume_id" {
+  value = module.volume["postgres"].volume_id
 }

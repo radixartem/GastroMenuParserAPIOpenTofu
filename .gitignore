@@ -497,3 +497,13 @@ crash.log
 !*.tfvars.example
 backend.hcl
 terraform/.terraform.lock.hcl
+
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfvars
+!**/*.tfvars.example
+
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

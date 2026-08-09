@@ -1,4 +1,5 @@
-variable "volume_name" { type = string }
-variable "size_gb" { type = number default = 20 }
-variable "location" { type = string }
-variable "format" { type = string default = "ext4" }
+variable "volume_name"       { type = string }
+variable "size"              { type = number }
+variable "location"          { type = string }
+variable "delete_protection" { type = bool; default = true }
+variable "labels"            { type = map(string); default = {} }
