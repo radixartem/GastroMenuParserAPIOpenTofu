@@ -4,7 +4,7 @@
   become: true
   gather_facts: true
   vars:
-    deploy_user: "{{ deploy_user | default('deploy') }}"
+    deploy_user: "{{ lookup('env', 'DEPLOY_USER') | default('deploy', true) }}"
     app_dir: /opt/gastro-api
     postgres_data_dir: /srv/gastro/postgres
     postgres_volume_device: "{{ lookup('env', 'POSTGRES_VOLUME_DEVICE') | default('', true) }}"
