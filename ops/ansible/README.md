@@ -6,7 +6,7 @@ Install collections:
 ansible-galaxy collection install -r requirements.yml
 ```
 
-Bootstrap the existing Ubuntu 26.04 server:
+Bootstrap the existing Ubuntu 26.04   server:
 
 ```bash
 export PRODUCTION_IP=YOUR_SERVER_IP
