@@ -1,4 +1,7 @@
-variable "firewall_name" { type = string }
+variable "firewall_name" {
+  type = string
+}
+
 variable "rules" {
   type = list(object({
     direction  = string
@@ -7,4 +10,8 @@ variable "rules" {
     source_ips = list(string)
   }))
 }
-variable "labels" { type = map(string); default = {} }
+
+variable "labels" {
+  type    = map(string)
+  default = {}
+}

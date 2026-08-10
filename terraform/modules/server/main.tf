@@ -18,13 +18,6 @@ resource "hcloud_server" "this" {
 
   lifecycle {
     prevent_destroy = var.prevent_destroy
+    ignore_changes  = [user_data]  
   }
-}
-
-resource "hcloud_volume_attachment" "this" {
-  count = var.volume_id != null ? 1 : 0
-
-  server_id = hcloud_server.this.id
-  volume_id = var.volume_id
-  # automount оставлен по умолчанию (false), чтобы не менять поведение существующего сервера при импорте
 }

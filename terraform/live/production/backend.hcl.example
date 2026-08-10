@@ -1,4 +1,4 @@
-bucket   = "gastro-api-terraform-state"
-key      = "production/terraform.tfstate"
+bucket   = "gastro-api-opentofu-state"
+key      = "production/opentofu.tfstate"
 region   = "fsn1"
 endpoint = "https://fsn1.your-objectstorage.com"
