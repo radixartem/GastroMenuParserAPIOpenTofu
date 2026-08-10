@@ -17,7 +17,7 @@ jobs:
   opentofu-apply:
     runs-on: ubuntu-latest
     environment:
-      name: production   # требует ручного approval в GitHub Environments
+      name: production
 
     defaults:
       run:
@@ -36,7 +36,9 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.OBJ_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.OBJ_SECRET_KEY }}
-        run: tofu init -backend-config="endpoint=${{ secrets.OBJ_ENDPOINT }}"
+        run: |
+          tofu init \
+            -backend-config="endpoint=${{ secrets.OBJ_ENDPOINT }}"
 
       - name: Validate
         run: tofu validate
@@ -45,4 +47,6 @@ jobs:
         env:
           TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           TF_VAR_ssh_key_ids: ${{ secrets.SSH_KEY_IDS }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.OBJ_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.OBJ_SECRET_KEY }}
         run: tofu apply -auto-approve
