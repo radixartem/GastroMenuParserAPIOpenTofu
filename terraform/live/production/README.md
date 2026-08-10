@@ -9,7 +9,7 @@ terraform init -backend-config=backend.hcl
 terraform plan
 ```
 
-Required backend environment variables:
+Required backend environment variables :
 
 ```bash
 export AWS_ACCESS_KEY_ID=...
