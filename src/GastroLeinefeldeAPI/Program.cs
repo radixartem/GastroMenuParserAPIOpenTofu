@@ -18,7 +18,7 @@ builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo
     {
-        Title = "Gastro Menu   Parser API ",
+        Title = "Gastro Menu Parser API ",
         Version = "v1"
     });
 });
