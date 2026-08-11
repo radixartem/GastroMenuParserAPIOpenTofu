@@ -102,7 +102,7 @@ jobs:
           fi
           
           docker compose --env-file .env pull
-          docker compose --env-file .env up -d --remove-orphans
+          docker compose --env-file .env up -d --force-recreate --remove-orphans
           
           if [ -f docker-compose.monitoring.yml ]; then
             docker compose --env-file .env -f docker-compose.monitoring.yml pull
@@ -113,3 +113,8 @@ jobs:
       - name: Verify deployment
         run: |
           ssh "$DEPLOY_USER@$SERVER_HOST" "cd /opt/gastro-api && docker compose --env-file .env ps"
+
+      - name: Verify API is running
+        run: |
+          sleep 10
+          ssh "$DEPLOY_USER@$SERVER_HOST" "curl -fsS http://localhost:8080/health/live"

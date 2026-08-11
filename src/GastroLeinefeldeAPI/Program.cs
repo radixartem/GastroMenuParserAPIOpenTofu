@@ -69,11 +69,8 @@ if (applyMigrations)
     await db.Database.MigrateAsync();
 }
 
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+app.UseSwagger();
+app.UseSwaggerUI();
 
 app.UseHttpMetrics();
 app.UseMetricServer();
