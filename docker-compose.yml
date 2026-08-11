@@ -23,6 +23,7 @@ services:
     image: ${IMAGE_NAME:-ghcr.io/radixartem/gastro-menu-parser-api}:${VERSION:-latest}
     container_name: gastro-api
     restart: always
+    stop_grace_period: 30s
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
