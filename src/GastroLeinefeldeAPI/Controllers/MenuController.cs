@@ -45,7 +45,7 @@ public class MenuController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Menu import request failed");
+            _logger.LogError(ex, "Menu import request failed 123");
             return Problem(statusCode: StatusCodes.Status500InternalServerError, title: "Menu import failed");
         }
     }

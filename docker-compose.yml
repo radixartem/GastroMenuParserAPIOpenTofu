@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-gastro_menu}
     volumes:
       - ${POSTGRES_DATA_DIR:-/srv/gastro/postgres}:/var/lib/postgresql/data
@@ -20,7 +20,7 @@ services:
       - no-new-privileges:true
 
   api:
-    image: ${IMAGE_NAME:-ghcr.io/radixartem/gastromenuparserapi}:${VERSION:-latest}
+    image: ${IMAGE_NAME:-ghcr.io/radixartem/gastro-menu-parser-api}:${VERSION:-latest}
     container_name: gastro-api
     restart: unless-stopped
     environment:
@@ -68,5 +68,6 @@ networks:
     driver: bridge
 
 volumes:
+  postgres_data:
   caddy_data:
   caddy_config:
