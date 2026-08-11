@@ -2,7 +2,7 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: gastro-postgres
-    restart: unless-stopped
+    restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -22,7 +22,7 @@ services:
   api:
     image: ${IMAGE_NAME:-ghcr.io/radixartem/gastro-menu-parser-api}:${VERSION:-latest}
     container_name: gastro-api
-    restart: unless-stopped
+    restart: always
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
@@ -47,7 +47,7 @@ services:
   caddy:
     image: caddy:2-alpine
     container_name: gastro-caddy
-    restart: unless-stopped
+    restart: always
     ports:
       - "80:80"
       - "443:443"
