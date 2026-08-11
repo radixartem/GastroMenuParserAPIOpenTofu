@@ -1,6 +1,6 @@
 {
     admin off
-    email {$ACME_EMAIL}
+    email praktikant@alderis.de
 }
 
 gastro.opik.net {

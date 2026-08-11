@@ -16,8 +16,9 @@ EXPOSE 8080
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/* \
-    && addgroup --system --gid 10001 appgroup \
-    && adduser --system --uid 10001 --ingroup appgroup appuser
+    && groupadd -r -g 10001 appgroup \
+    && useradd -r -u 10001 -g appgroup appuser
+        
 COPY --from=build /app/publish .
 RUN chown -R appuser:appgroup /app
 USER appuser
