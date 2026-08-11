@@ -93,20 +93,17 @@ jobs:
 
           # залогиниться в ghcr.io и выполнить деплой
           printf '%s' "$GHCR_TOKEN" | ssh "$DEPLOY_USER@$SERVER_HOST" "docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
-          ssh "$DEPLOY_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          ssh "$DEPLOY_USER@$SERVER_HOST" VERSION="$VERSION" IMAGE_NAME="$IMAGE_NAME" 'bash -s' <<'REMOTE'
           set -Eeuo pipefail
           cd /opt/gastro-api
-
-          # заменить latest на конкретный SHA в docker-compose.yml (если не latest)
+          
           if [ "$VERSION" != "latest" ]; then
             sed -i "s|$IMAGE_NAME:latest|$IMAGE_NAME:$VERSION|" docker-compose.yml
           fi
-
-          # запуск основных сервисов
+          
           docker compose --env-file .env pull
           docker compose --env-file .env up -d --remove-orphans
-
-          # мониторинг (если файл существует)
+          
           if [ -f docker-compose.monitoring.yml ]; then
             docker compose --env-file .env -f docker-compose.monitoring.yml pull
             docker compose --env-file .env -f docker-compose.monitoring.yml up -d --remove-orphans
