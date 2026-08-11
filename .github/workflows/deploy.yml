@@ -2,15 +2,19 @@ name: Deploy Production
 
 on:
   workflow_run:
-    workflows: [Build]
-    types: [completed]
-    branches: [main]
+    workflows:
+      - Build
+    types:
+      - completed
+    branches:
+      - main
+
   workflow_dispatch:
     inputs:
       version:
-        description: 'GHCR image tag (commit SHA or latest)'
+        description: "GHCR image tag (commit SHA or latest)"
         required: true
-        default: 'latest'
+        default: "latest"
 
 permissions:
   contents: read
@@ -21,96 +25,414 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
     runs-on: ubuntu-latest
+
     environment: production
+
     env:
       SERVER_HOST: ${{ secrets.PROD_SERVER_IP }}
       DEPLOY_USER: ${{ secrets.PROD_DEPLOY_USER }}
-      VERSION: ${{ github.event.inputs.version || github.event.workflow_run.head_sha }}
+
+      VERSION: >-
+        ${{ github.event.inputs.version ||
+        github.event.workflow_run.head_sha }}
+
       IMAGE_NAME: ghcr.io/radixartem/gastro-menu-parser-api
+
     steps:
-      - uses: actions/checkout@v4
+
+      # ==========================================================
+      # Checkout
+      # ==========================================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      # ==========================================================
+      # SSH
+      # ==========================================================
 
       - name: Configure SSH
         env:
           SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_KEY }}
           KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
         run: |
+          set -Eeuo pipefail
+
           install -d -m 700 ~/.ssh
+
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
+
           if [ -n "$KNOWN_HOSTS" ]; then
             printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           else
             ssh-keyscan -H "$SERVER_HOST" >> ~/.ssh/known_hosts
           fi
 
+
+      # ==========================================================
+      # Upload runtime files
+      # ==========================================================
+
       - name: Upload runtime files
         run: |
+          set -Eeuo pipefail
+
           tar czf /tmp/gastro-deploy.tgz \
             docker-compose.yml \
             docker-compose.monitoring.yml \
             caddy \
             ops/monitoring \
             ops/backups
-          scp /tmp/gastro-deploy.tgz "$DEPLOY_USER@$SERVER_HOST:/tmp/gastro-deploy.tgz"
 
-      - name: Create .env and deploy
+          scp \
+            /tmp/gastro-deploy.tgz \
+            "$DEPLOY_USER@$SERVER_HOST:/tmp/gastro-deploy.tgz"
+
+
+      # ==========================================================
+      # Create production .env
+      # ==========================================================
+
+      - name: Create production environment file
         env:
           POSTGRES_PASSWORD: ${{ secrets.PROD_POSTGRES_PASSWORD }}
           GRAFANA_PASSWORD: ${{ secrets.PROD_GRAFANA_PASSWORD }}
           IMPORT_API_KEY: ${{ secrets.PROD_IMPORT_API_KEY }}
           ACME_EMAIL: ${{ secrets.ACME_EMAIL }}
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
-          GHCR_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
         run: |
+          set -Eeuo pipefail
+
           umask 077
+
           cat > /tmp/gastro.env <<EOF
-          VERSION=$VERSION
           IMAGE_NAME=$IMAGE_NAME
+          VERSION=$VERSION
+
           POSTGRES_USER=postgres
           POSTGRES_PASSWORD=$POSTGRES_PASSWORD
           POSTGRES_DB=gastro_menu
+
           ASPNETCORE_ENVIRONMENT=Production
           APPLY_MIGRATIONS=true
+
           IMPORT_API_KEY=$IMPORT_API_KEY
+
           GRAFANA_ADMIN_USER=admin
           GRAFANA_ADMIN_PASSWORD=$GRAFANA_PASSWORD
+
           ACME_EMAIL=$ACME_EMAIL
           EOF
-          scp /tmp/gastro.env "$DEPLOY_USER@$SERVER_HOST:/tmp/gastro.env"
 
-          # распаковать файлы и переместить .env
+          scp \
+            /tmp/gastro.env \
+            "$DEPLOY_USER@$SERVER_HOST:/tmp/gastro.env"
+
+
+      # ==========================================================
+      # Install runtime files
+      # ==========================================================
+
+      - name: Install runtime files
+        run: |
+          set -Eeuo pipefail
+
           ssh "$DEPLOY_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
           set -Eeuo pipefail
-          sudo install -d -m 0755 /opt/gastro-api /opt/gastro-api/caddy /etc/gastro-api
-          sudo tar xzf /tmp/gastro-deploy.tgz -C /opt/gastro-api
-          sudo install -m 0600 /tmp/gastro.env /opt/gastro-api/.env
-          sudo chown -R "$USER":"$USER" /opt/gastro-api
-          rm -f /tmp/gastro-deploy.tgz /tmp/gastro.env
+
+          sudo install -d -m 0755 /opt/gastro-api
+          sudo install -d -m 0755 /etc/gastro-api
+
+          sudo tar xzf \
+            /tmp/gastro-deploy.tgz \
+            -C /opt/gastro-api
+
+          sudo install \
+            -m 0600 \
+            /tmp/gastro.env \
+            /opt/gastro-api/.env
+
+          sudo chown -R "$USER:$USER" /opt/gastro-api
+
+          rm -f \
+            /tmp/gastro-deploy.tgz \
+            /tmp/gastro.env
           REMOTE
 
-          # залогиниться в ghcr.io и выполнить деплой
-          printf '%s' "$GHCR_TOKEN" | ssh "$DEPLOY_USER@$SERVER_HOST" "docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
-          ssh "$DEPLOY_USER@$SERVER_HOST" VERSION="$VERSION" IMAGE_NAME="$IMAGE_NAME" 'bash -s' <<'REMOTE'
+
+      # ==========================================================
+      # Login to GHCR
+      # ==========================================================
+
+      - name: Login to GHCR
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+        run: |
           set -Eeuo pipefail
+
+          printf '%s' "$GHCR_TOKEN" |
+            ssh "$DEPLOY_USER@$SERVER_HOST" \
+              "docker login ghcr.io \
+                -u '$GHCR_USERNAME' \
+                --password-stdin"
+
+
+      # ==========================================================
+      # Deploy
+      # ==========================================================
+
+      - name: Deploy production
+        run: |
+          set -Eeuo pipefail
+
+          ssh "$DEPLOY_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+
           cd /opt/gastro-api
-          
-          if [ "$VERSION" != "latest" ]; then
-            sed -i "s|$IMAGE_NAME:latest|$IMAGE_NAME:$VERSION|" docker-compose.yml
+
+          # ------------------------------------------------------
+          # Read deployment variables
+          # ------------------------------------------------------
+
+          set -a
+          source .env
+          set +a
+
+          echo "=========================================="
+          echo "Deploying Gastro API"
+          echo "Image: ${IMAGE_NAME}:${VERSION}"
+          echo "=========================================="
+
+          # ------------------------------------------------------
+          # Ensure shared Docker network exists
+          # ------------------------------------------------------
+
+          if ! docker network inspect gastro-network >/dev/null 2>&1; then
+            echo "Creating Docker network: gastro-network"
+
+            docker network create \
+              --driver bridge \
+              gastro-network
           fi
-          
-          docker compose --env-file .env pull
-          docker compose --env-file .env up -d --force-recreate --remove-orphans
-          
+
+          # ------------------------------------------------------
+          # Validate application Compose configuration
+          # ------------------------------------------------------
+
+          docker compose \
+            --env-file .env \
+            -p gastro-api \
+            config >/dev/null
+
+          # ------------------------------------------------------
+          # Pull application images
+          # ------------------------------------------------------
+
+          echo "Pulling application images..."
+
+          docker compose \
+            --env-file .env \
+            -p gastro-api \
+            pull
+
+          # ------------------------------------------------------
+          # Start application stack
+          # ------------------------------------------------------
+
+          echo "Starting application stack..."
+
+          docker compose \
+            --env-file .env \
+            -p gastro-api \
+            up -d \
+            --force-recreate \
+            --remove-orphans
+
+          # ------------------------------------------------------
+          # Validate monitoring Compose configuration
+          # ------------------------------------------------------
+
           if [ -f docker-compose.monitoring.yml ]; then
-            docker compose --env-file .env -f docker-compose.monitoring.yml pull
-            docker compose --env-file .env -f docker-compose.monitoring.yml up -d --remove-orphans
+
+            docker compose \
+              --env-file .env \
+              -p gastro-monitoring \
+              -f docker-compose.monitoring.yml \
+              config >/dev/null
+
+            # ----------------------------------------------------
+            # Pull monitoring images
+            # ----------------------------------------------------
+
+            echo "Pulling monitoring images..."
+
+            docker compose \
+              --env-file .env \
+              -p gastro-monitoring \
+              -f docker-compose.monitoring.yml \
+              pull
+
+            # ----------------------------------------------------
+            # Start monitoring stack
+            # ----------------------------------------------------
+
+            echo "Starting monitoring stack..."
+
+            docker compose \
+              --env-file .env \
+              -p gastro-monitoring \
+              -f docker-compose.monitoring.yml \
+              up -d \
+              --remove-orphans
+
+          fi
+
+          # ------------------------------------------------------
+          # Status
+          # ------------------------------------------------------
+
+          echo
+          echo "=========================================="
+          echo "Application status"
+          echo "=========================================="
+
+          docker compose \
+            --env-file .env \
+            -p gastro-api \
+            ps
+
+          if [ -f docker-compose.monitoring.yml ]; then
+
+            echo
+            echo "=========================================="
+            echo "Monitoring status"
+            echo "=========================================="
+
+            docker compose \
+              --env-file .env \
+              -p gastro-monitoring \
+              -f docker-compose.monitoring.yml \
+              ps
+
           fi
           REMOTE
+
+
+      # ==========================================================
+      # Verify deployment
+      # ==========================================================
 
       - name: Verify deployment
         run: |
-          ssh "$DEPLOY_USER@$SERVER_HOST" "cd /opt/gastro-api && docker compose --env-file .env ps"
+          set -Eeuo pipefail
+
+          ssh "$DEPLOY_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+
+          cd /opt/gastro-api
+
+          echo "=========================================="
+          echo "Verifying application"
+          echo "=========================================="
+
+          docker compose \
+            --env-file .env \
+            -p gastro-api \
+            ps
+
+          # ------------------------------------------------------
+          # API health
+          # ------------------------------------------------------
+
+          API_CONTAINER="$(docker compose \
+            --env-file .env \
+            -p gastro-api \
+            ps -q api)"
+
+          if [ -z "$API_CONTAINER" ]; then
+            echo "ERROR: API container was not found"
+            exit 1
+          fi
+
+          API_STATUS="$(docker inspect \
+            --format '{{.State.Status}}' \
+            "$API_CONTAINER")"
+
+          API_HEALTH="$(docker inspect \
+            --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
+            "$API_CONTAINER")"
+
+          echo "API status: $API_STATUS"
+          echo "API health: $API_HEALTH"
+
+          if [ "$API_STATUS" != "running" ]; then
+            echo "ERROR: API container is not running"
+            docker logs --tail 100 "$API_CONTAINER" || true
+            exit 1
+          fi
+
+          if [ "$API_HEALTH" != "healthy" ]; then
+            echo "ERROR: API container is not healthy"
+            docker logs --tail 100 "$API_CONTAINER" || true
+            exit 1
+          fi
+
+          # ------------------------------------------------------
+          # Caddy status
+          # ------------------------------------------------------
+
+          CADDY_CONTAINER="$(docker compose \
+            --env-file .env \
+            -p gastro-api \
+            ps -q caddy)"
+
+          if [ -n "$CADDY_CONTAINER" ]; then
+            CADDY_STATUS="$(docker inspect \
+              --format '{{.State.Status}}' \
+              "$CADDY_CONTAINER")"
+
+            echo "Caddy status: $CADDY_STATUS"
+
+            if [ "$CADDY_STATUS" != "running" ]; then
+              echo "ERROR: Caddy is not running"
+              docker logs --tail 100 "$CADDY_CONTAINER" || true
+              exit 1
+            fi
+          fi
+
+          # ------------------------------------------------------
+          # PostgreSQL status
+          # ------------------------------------------------------
+
+          POSTGRES_CONTAINER="$(docker compose \
+            --env-file .env \
+            -p gastro-api \
+            ps -q postgres)"
+
+          if [ -n "$POSTGRES_CONTAINER" ]; then
+            POSTGRES_STATUS="$(docker inspect \
+              --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
+              "$POSTGRES_CONTAINER")"
+
+            echo "PostgreSQL status: $POSTGRES_STATUS"
+
+            if [ "$POSTGRES_STATUS" != "healthy" ]; then
+              echo "ERROR: PostgreSQL is not healthy"
+              docker logs --tail 100 "$POSTGRES_CONTAINER" || true
+              exit 1
+            fi
+          fi
+
+          echo
+          echo "=========================================="
+          echo "Deployment verification successful"
+          echo "=========================================="
+          REMOTE
 
