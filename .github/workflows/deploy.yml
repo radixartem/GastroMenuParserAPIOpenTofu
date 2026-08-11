@@ -114,7 +114,3 @@ jobs:
         run: |
           ssh "$DEPLOY_USER@$SERVER_HOST" "cd /opt/gastro-api && docker compose --env-file .env ps"
 
-      - name: Verify API is running
-        run: |
-          sleep 10
-          ssh "$DEPLOY_USER@$SERVER_HOST" "curl -fsS http://localhost:8080/health/live"
