@@ -68,3 +68,5 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 app.MapControllers();
 
 await app.RunAsync();
+
+// test
