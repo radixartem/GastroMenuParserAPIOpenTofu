@@ -1,6 +1,8 @@
 # GastroMenuParserAPI
 
-Production-ready ASP.NET Core API for importing menu data from `essen-auf-raedern-eichsfeld.de`, PostgreSQL persistence, Docker Compose deployment and Prometheus/Grafana/Loki observability. Infrastructure is managed with OpenTofu, server configuration with Ansible, and CI/CD with GitHub Actions.
+Production-ready ASP.NET Core API for importing menu data from `essen-auf-raedern-eichsfeld.de`, PostgreSQL persistence, Docker Compose deployment, and Prometheus/Grafana/Loki observability.
+
+Infrastructure is managed with OpenTofu, server configuration with Ansible, and CI/CD with GitHub Actions.
 
 ## Current stack
 
@@ -17,135 +19,192 @@ Production-ready ASP.NET Core API for importing menu data from `essen-auf-raeder
 
 ## First deployment
 
-1.  Ensure DNS for `gastro.opik.net` points to your server IP.
-2.  Install Ansible collections:
-    ```bash
-    ansible-galaxy collection install -r ops/ansible/requirements.yml
-If the server already exists in Hetzner, obtain its IP (e.g. via tofu output servers after import, see Infrastructure management). Bootstrap the server:
+### 1. Configure DNS
 
-bash
+Ensure DNS for `gastro.opik.net` points to your server IP.
+
+### 2. Install Ansible collections
+
+```bash
+ansible-galaxy collection install -r ops/ansible/requirements.yml
+```
+
+If the server already exists in Hetzner, obtain its IP, for example via `tofu output servers` after import as described in [Infrastructure management](#infrastructure-management).
+
+Bootstrap the server:
+
+```bash
 export PRODUCTION_IP=YOUR_SERVER_IP
-ansible-playbook -i ops/ansible/inventory/hosts.yml ops/ansible/playbooks/bootstrap.yml
+
+ansible-playbook \
+  -i ops/ansible/inventory/hosts.yml \
+  ops/ansible/playbooks/bootstrap.yml
+```
+
 The server is now ready for application deployment.
 
-Create a GitHub Environment named production and add the following secrets:
+### 3. Configure GitHub Environment and secrets
 
-Application deployment:
+Create a GitHub Environment named `production` and add the following secrets.
 
-PROD_SERVER_IP – production server IP
+#### Application deployment
 
-PROD_DEPLOY_USER – deploy
+- `PROD_SERVER_IP` — production server IP
+- `PROD_DEPLOY_USER` — `deploy`
+- `PROD_SSH_KEY` — private SSH key
+- `PROD_KNOWN_HOSTS` — server's `known_hosts` entry
+- `PROD_POSTGRES_PASSWORD` — PostgreSQL password
+- `PROD_GRAFANA_PASSWORD` — Grafana admin password
+- `PROD_IMPORT_API_KEY` — API key for menu import endpoints
+- `GHCR_USERNAME` — GitHub Packages username
+- `GHCR_READ_TOKEN` — token with `read:packages` scope
+- `ACME_EMAIL` — email for Let's Encrypt / Caddy
+- `OBJ_ACCESS_KEY` — Hetzner Object Storage access key
+- `OBJ_SECRET_KEY` — Object Storage secret key
+- `OBJ_ENDPOINT` — Object Storage endpoint
+- `OBJ_BUCKET` — backup bucket name
 
-PROD_SSH_KEY – private SSH key
+#### OpenTofu CI: plan and apply
 
-PROD_KNOWN_HOSTS – server's known_hosts entry
+- `HCLOUD_TOKEN` — Hetzner Cloud API token
+- `SSH_KEY_IDS` — list of SSH key IDs in `[123456]` format
+- `SERVERS_CONFIG` — HCL map of server configuration
+- `OBJ_ACCESS_KEY` — same Object Storage access key used for the state bucket
+- `OBJ_SECRET_KEY` — same Object Storage secret key used for the state bucket
+- `OBJ_ENDPOINT` — Object Storage endpoint for the state bucket
 
-PROD_POSTGRES_PASSWORD – PostgreSQL password
+Enable **Required reviewers** on the `production` environment to protect infrastructure apply operations.
 
-PROD_GRAFANA_PASSWORD – Grafana admin password
+### 4. Deploy via CI/CD
 
-PROD_IMPORT_API_KEY – API key for menu import endpoints
+Push to `main`.
 
-GHCR_USERNAME – GitHub Packages username
+The build workflow:
 
-GHCR_READ_TOKEN – token with read:packages scope
+1. Tests the application.
+2. Builds an immutable Docker image tagged with the commit SHA.
+3. Pushes the image to GHCR.
+4. Deploys that specific image to the production server.
 
-ACME_EMAIL – email for Let's Encrypt (Caddy)
+## Manual deployment without CI
 
-OBJ_ACCESS_KEY – Hetzner Object Storage access key
+Copy the repository to `/opt/gastro-api` on the server and create a `.env` file from `.env.example`.
 
-OBJ_SECRET_KEY – Object Storage secret key
+Start the application:
 
-OBJ_ENDPOINT – Object Storage endpoint
-
-OBJ_BUCKET – backup bucket name
-
-OpenTofu CI (plan/apply):
-
-HCLOUD_TOKEN – Hetzner Cloud API token
-
-SSH_KEY_IDS – list of SSH key IDs in [123456] format
-
-SERVERS_CONFIG – HCL map of servers configuration
-
-OBJ_ACCESS_KEY – same Object Storage access key (for state bucket)
-
-OBJ_SECRET_KEY – same Object Storage secret key
-
-OBJ_ENDPOINT – Object Storage endpoint (state bucket)
-
-Enable Required reviewers on the production environment to protect apply operations.
-
-Push to main. The build workflow tests the application, builds an immutable Docker image tagged with the commit SHA, pushes it to GHCR, and deploys that image to the production server.
-
-Manual deployment (without CI)
-Copy the repository to /opt/gastro-api on the server, create a .env file from .env.example, then:
-
-bash
+```bash
 cd /opt/gastro-api
+
 docker compose --env-file .env pull
 docker compose --env-file .env up -d
+```
+
 Start monitoring:
 
-bash
-docker compose --env-file .env -f docker-compose.monitoring.yml up -d
-Verification
-bash
+```bash
+docker compose \
+  --env-file .env \
+  -f docker-compose.monitoring.yml \
+  up -d
+```
+
+## Verification
+
+Check container status:
+
+```bash
 docker compose --env-file .env ps
+```
+
+Check the public endpoint:
+
+```bash
 curl -I https://gastro.opik.net
 curl https://gastro.opik.net/api/menu
-Internal health checks are available inside the Docker network at /health/live and /health/ready. The /metrics endpoint is not proxied publicly; Prometheus scrapes api:8080/metrics internally.
+```
 
-Grafana and Prometheus are bound to 127.0.0.1 on the host. Access them via an SSH tunnel:
+Internal health checks are available inside the Docker network:
 
-bash
+- `/health/live`
+- `/health/ready`
+
+The `/metrics` endpoint is not proxied publicly. Prometheus scrapes `api:8080/metrics` internally.
+
+### Access Grafana and Prometheus
+
+Grafana and Prometheus are bound to `127.0.0.1` on the host. Access them through an SSH tunnel:
+
+```bash
 ssh -L 3000:127.0.0.1:3000 deploy@YOUR_SERVER_IP
-Then open http://localhost:3000.
+```
 
-Backups
-Enable the backup timer:
+Then open:
 
-bash
+`http://localhost:3000`
+
+## Backups
+
+### Enable the backup timer
+
+```bash
 sudo /usr/local/bin/gastro-install-systemd
 systemctl list-timers gastro-backup.timer
-Manual backup:
+```
 
-bash
+### Create a manual backup
+
+```bash
 sudo /usr/local/bin/gastro-backup
-Restore:
+```
 
-bash
-sudo /opt/gastro-api/ops/backups/restore.sh /path/to/postgres_YYYYMMDDTHHMMSSZ.dump
-Infrastructure management (OpenTofu)
-Hetzner infrastructure is managed with OpenTofu. The existing server, volume and firewall are not recreated — they are imported into the state once, after which all changes are driven by code.
+### Restore a backup
 
-Directory layout
-text
+```bash
+sudo /opt/gastro-api/ops/backups/restore.sh \
+  /path/to/postgres_YYYYMMDDTHHMMSSZ.dump
+```
+
+## Infrastructure management
+
+Hetzner infrastructure is managed with OpenTofu.
+
+The existing server, volume, and firewall are not recreated. They are imported into the OpenTofu state once, after which all changes are driven by code.
+
+### Directory layout
+
+```text
 terraform/
-├── live/production/   # production environment configuration
-│   ├── main.tf
-│   ├── variables.tf
-│   ├── outputs.tf
-│   ├── imports.tf     # used ONLY for initial import, then removed
-│   └── ...
+├── live/
+│   └── production/   # production environment configuration
+│       ├── main.tf
+│       ├── variables.tf
+│       ├── outputs.tf
+│       ├── imports.tf     # used ONLY for initial import, then removed
+│       └── ...
 └── modules/
     ├── server/
     ├── volume/
     └── firewall/
-Importing existing infrastructure
+```
+
+### Importing existing infrastructure
+
 Obtain the real Hetzner resource IDs:
 
-bash
+```bash
 hcloud server list
 hcloud firewall list
 hcloud volume list
-In terraform/live/production/imports.tf, uncomment the import blocks and insert the corresponding IDs.
+```
 
-Create a local terraform.tfvars (do not commit):
+In `terraform/live/production/imports.tf`, uncomment the import blocks and insert the corresponding IDs.
 
-hcl
+Create a local `terraform.tfvars` file and do not commit it:
+
+```hcl
 hcloud_token = "..."
 ssh_key_ids  = [123456]
+
 servers = {
   gastro-prod = {
     server_name = "gastro-prod"
@@ -155,36 +214,62 @@ servers = {
     volume_role = "postgres"
   }
 }
+
 volume_size = <actual volume size>
+```
+
 Set environment variables for Object Storage access:
 
-bash
+```bash
 export AWS_ACCESS_KEY_ID=...
 export AWS_SECRET_ACCESS_KEY=...
 export OBJ_ENDPOINT=https://hel1.your-objectstorage.com
+```
+
 Run the import:
 
-bash
+```bash
 cd terraform/live/production
+
 tofu init -backend-config="endpoint=$OBJ_ENDPOINT"
-tofu plan   # ensure no unexpected create/destroy operations
+tofu plan   # Ensure there are no unexpected create/destroy operations.
 tofu apply
-After a successful apply, remove (or comment out) imports.tf. A second tofu plan should show No changes. Commit the changes, including the .terraform.lock.hcl file.
+```
 
-Daily operations
-Plan infrastructure changes for a pull request:
+After a successful apply:
 
-bash
+1. Remove or comment out `imports.tf`.
+2. Run `tofu plan` again and verify that it shows `No changes`.
+3. Commit the infrastructure changes, including `.terraform.lock.hcl`.
+
+## Daily operations
+
+### Plan infrastructure changes
+
+For a pull request:
+
+```bash
 tofu plan
-Apply (via CI after merge, or locally with caution):
+```
 
-bash
+### Apply infrastructure changes
+
+Via CI after merge, or locally with caution:
+
+```bash
 tofu apply
-Add a second server (configuration only, no volume attached):
+```
 
-hcl
+### Add a second server
+
+Configuration only, with no volume attached:
+
+```hcl
 servers = {
-  gastro-prod = { ... }
+  gastro-prod = {
+    # Existing production server configuration.
+  }
+
   gastro-api-2 = {
     server_name = "gastro-api-2"
     server_type = "cx22"
@@ -192,33 +277,32 @@ servers = {
     location    = "fsn1"
   }
 }
-Retrieve server IPs:
+```
 
-bash
+### Retrieve server IPs
+
+```bash
 tofu output servers
-Important notes
-The PostgreSQL volume is attached only to the server with volume_role = "postgres".
+```
 
-prevent_destroy = true prevents accidental deletion of servers via OpenTofu.
+### Important notes
 
-delete_protection = true on the volume adds an extra layer of protection on the Hetzner side.
+- The PostgreSQL volume is attached only to the server with `volume_role = "postgres"`.
+- `prevent_destroy = true` prevents accidental deletion of servers via OpenTofu.
+- `delete_protection = true` on the volume adds an additional protection layer on the Hetzner side.
+- S3 backend credentials are never stored in HCL files. Use environment variables or CI secrets.
 
-S3 backend credentials are never stored in HCL files — use environment variables or CI secrets.
+## CI/CD workflows
 
-CI/CD workflows
-build.yml — builds, tests, and pushes a Docker image to GHCR.
+- `build.yml` — builds, tests, and pushes a Docker image to GHCR.
+- `deploy.yml` — deploys containers to the production server via SSH using the specific SHA tag.
+- `infrastructure.yml` — runs on pull requests and executes `tofu plan`, formatting checks, and validation.
+- `infrastructure-apply.yml` — runs on pushes to `main`, requires approval in the GitHub Environment, and applies infrastructure changes.
 
-deploy.yml — deploys containers to the production server via SSH using the specific SHA tag.
+## Security notes
 
-infrastructure.yml — runs on PRs, executes tofu plan, format checking and validation.
-
-infrastructure-apply.yml — runs on pushes to main, requires approval in the GitHub Environment and applies infrastructure changes.
-
-Security notes
-Never commit .env, backend credentials, private SSH keys or tokens.
-
-Only ports 80 and 443 (Caddy) are publicly exposed. PostgreSQL, Prometheus, Grafana, Loki and other services are accessible only inside the Docker network or via localhost.
-
-Docker published ports can bypass UFW rules – this stack only publishes Caddy's ports externally.
-
-Do not enable volume formatting for an existing PostgreSQL volume unless you are certain it is empty. The existing production volume must never be reformatted.
+- Never commit `.env`, backend credentials, private SSH keys, or tokens.
+- Only ports `80` and `443` for Caddy are publicly exposed.
+- PostgreSQL, Prometheus, Grafana, Loki, and other internal services are accessible only inside the Docker network or via `localhost`.
+- Docker published ports can bypass UFW rules. This stack publishes only Caddy's external ports.
+- Do not enable volume formatting for an existing PostgreSQL volume unless you are certain it is empty. The existing production volume must never be reformatted.
