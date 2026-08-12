@@ -30,32 +30,17 @@ jobs:
       github.event.workflow_run.conclusion == 'success'
 
     runs-on: ubuntu-latest
-
     environment: production
 
     env:
       SERVER_HOST: ${{ secrets.PROD_SERVER_IP }}
       DEPLOY_USER: ${{ secrets.PROD_DEPLOY_USER }}
-
-      VERSION: >-
-        ${{ github.event.inputs.version ||
-        github.event.workflow_run.head_sha }}
-
+      VERSION: ${{ github.event.inputs.version || github.event.workflow_run.head_sha }}
       IMAGE_NAME: ghcr.io/radixartem/gastro-menu-parser-api
 
     steps:
-
-      # ==========================================================
-      # Checkout
-      # ==========================================================
-
       - name: Checkout repository
         uses: actions/checkout@v4
-
-
-      # ==========================================================
-      # SSH
-      # ==========================================================
 
       - name: Configure SSH
         env:
@@ -75,11 +60,6 @@ jobs:
             ssh-keyscan -H "$SERVER_HOST" >> ~/.ssh/known_hosts
           fi
 
-
-      # ==========================================================
-      # Upload runtime files
-      # ==========================================================
-
       - name: Upload runtime files
         run: |
           set -Eeuo pipefail
@@ -94,11 +74,6 @@ jobs:
           scp \
             /tmp/gastro-deploy.tgz \
             "$DEPLOY_USER@$SERVER_HOST:/tmp/gastro-deploy.tgz"
-
-
-      # ==========================================================
-      # Create production .env
-      # ==========================================================
 
       - name: Create production environment file
         env:
@@ -134,11 +109,6 @@ jobs:
             /tmp/gastro.env \
             "$DEPLOY_USER@$SERVER_HOST:/tmp/gastro.env"
 
-
-      # ==========================================================
-      # Install runtime files
-      # ==========================================================
-
       - name: Install runtime files
         run: |
           set -Eeuo pipefail
@@ -149,9 +119,7 @@ jobs:
           sudo install -d -m 0755 /opt/gastro-api
           sudo install -d -m 0755 /etc/gastro-api
 
-          sudo tar xzf \
-            /tmp/gastro-deploy.tgz \
-            -C /opt/gastro-api
+          sudo tar xzf /tmp/gastro-deploy.tgz -C /opt/gastro-api
 
           sudo install \
             -m 0600 \
@@ -165,11 +133,6 @@ jobs:
             /tmp/gastro.env
           REMOTE
 
-
-      # ==========================================================
-      # Login to GHCR
-      # ==========================================================
-
       - name: Login to GHCR
         env:
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
@@ -177,16 +140,9 @@ jobs:
         run: |
           set -Eeuo pipefail
 
-          printf '%s' "$GHCR_TOKEN" |
+          printf '%s' "$GHCR_TOKEN" | \
             ssh "$DEPLOY_USER@$SERVER_HOST" \
-              "docker login ghcr.io \
-                -u '$GHCR_USERNAME' \
-                --password-stdin"
-
-
-      # ==========================================================
-      # Deploy
-      # ==========================================================
+            "docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
 
       - name: Deploy production
         run: |
@@ -197,43 +153,18 @@ jobs:
 
           cd /opt/gastro-api
 
-          # ------------------------------------------------------
-          # Read deployment variables
-          # ------------------------------------------------------
-
-          set -a
-          source .env
-          set +a
-
-          echo "=========================================="
-          echo "Deploying Gastro API"
-          echo "Image: ${IMAGE_NAME}:${VERSION}"
-          echo "=========================================="
-
-          # ------------------------------------------------------
-          # Ensure shared Docker network exists
-          # ------------------------------------------------------
-
           if ! docker network inspect gastro-network >/dev/null 2>&1; then
-            echo "Creating Docker network: gastro-network"
-
             docker network create \
               --driver bridge \
               gastro-network
           fi
 
-          # ------------------------------------------------------
-          # Validate application Compose configuration
-          # ------------------------------------------------------
+          echo "Validating application configuration..."
 
           docker compose \
             --env-file .env \
             -p gastro-api \
             config >/dev/null
-
-          # ------------------------------------------------------
-          # Pull application images
-          # ------------------------------------------------------
 
           echo "Pulling application images..."
 
@@ -242,11 +173,7 @@ jobs:
             -p gastro-api \
             pull
 
-          # ------------------------------------------------------
-          # Start application stack
-          # ------------------------------------------------------
-
-          echo "Starting application stack..."
+          echo "Deploying application..."
 
           docker compose \
             --env-file .env \
@@ -255,21 +182,15 @@ jobs:
             --force-recreate \
             --remove-orphans
 
-          # ------------------------------------------------------
-          # Validate monitoring Compose configuration
-          # ------------------------------------------------------
-
           if [ -f docker-compose.monitoring.yml ]; then
+
+            echo "Validating monitoring configuration..."
 
             docker compose \
               --env-file .env \
               -p gastro-monitoring \
               -f docker-compose.monitoring.yml \
               config >/dev/null
-
-            # ----------------------------------------------------
-            # Pull monitoring images
-            # ----------------------------------------------------
 
             echo "Pulling monitoring images..."
 
@@ -279,11 +200,7 @@ jobs:
               -f docker-compose.monitoring.yml \
               pull
 
-            # ----------------------------------------------------
-            # Start monitoring stack
-            # ----------------------------------------------------
-
-            echo "Starting monitoring stack..."
+            echo "Deploying monitoring..."
 
             docker compose \
               --env-file .env \
@@ -291,43 +208,23 @@ jobs:
               -f docker-compose.monitoring.yml \
               up -d \
               --remove-orphans
-
           fi
 
-          # ------------------------------------------------------
-          # Status
-          # ------------------------------------------------------
-
-          echo
-          echo "=========================================="
-          echo "Application status"
-          echo "=========================================="
+          echo "Application containers:"
 
           docker compose \
             --env-file .env \
             -p gastro-api \
             ps
 
-          if [ -f docker-compose.monitoring.yml ]; then
+          echo "Monitoring containers:"
 
-            echo
-            echo "=========================================="
-            echo "Monitoring status"
-            echo "=========================================="
-
-            docker compose \
-              --env-file .env \
-              -p gastro-monitoring \
-              -f docker-compose.monitoring.yml \
-              ps
-
-          fi
+          docker compose \
+            --env-file .env \
+            -p gastro-monitoring \
+            -f docker-compose.monitoring.yml \
+            ps
           REMOTE
-
-
-      # ==========================================================
-      # Verify deployment
-      # ==========================================================
 
       - name: Verify deployment
         run: |
@@ -337,19 +234,6 @@ jobs:
           set -Eeuo pipefail
 
           cd /opt/gastro-api
-
-          echo "=========================================="
-          echo "Verifying application"
-          echo "=========================================="
-
-          docker compose \
-            --env-file .env \
-            -p gastro-api \
-            ps
-
-          # ------------------------------------------------------
-          # API health
-          # ------------------------------------------------------
 
           API_CONTAINER="$(docker compose \
             --env-file .env \
@@ -373,66 +257,58 @@ jobs:
           echo "API health: $API_HEALTH"
 
           if [ "$API_STATUS" != "running" ]; then
-            echo "ERROR: API container is not running"
             docker logs --tail 100 "$API_CONTAINER" || true
             exit 1
           fi
 
           if [ "$API_HEALTH" != "healthy" ]; then
-            echo "ERROR: API container is not healthy"
-            docker logs --tail 100 "$API_CONTAINER" || true
-            exit 1
-          fi
+            echo "Waiting for API healthcheck..."
+            sleep 15
 
-          # ------------------------------------------------------
-          # Caddy status
-          # ------------------------------------------------------
+            API_HEALTH="$(docker inspect \
+              --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
+              "$API_CONTAINER")"
 
-          CADDY_CONTAINER="$(docker compose \
-            --env-file .env \
-            -p gastro-api \
-            ps -q caddy)"
-
-          if [ -n "$CADDY_CONTAINER" ]; then
-            CADDY_STATUS="$(docker inspect \
-              --format '{{.State.Status}}' \
-              "$CADDY_CONTAINER")"
-
-            echo "Caddy status: $CADDY_STATUS"
-
-            if [ "$CADDY_STATUS" != "running" ]; then
-              echo "ERROR: Caddy is not running"
-              docker logs --tail 100 "$CADDY_CONTAINER" || true
+            if [ "$API_HEALTH" != "healthy" ]; then
+              echo "ERROR: API is not healthy"
+              docker logs --tail 100 "$API_CONTAINER" || true
               exit 1
             fi
           fi
-
-          # ------------------------------------------------------
-          # PostgreSQL status
-          # ------------------------------------------------------
 
           POSTGRES_CONTAINER="$(docker compose \
             --env-file .env \
             -p gastro-api \
             ps -q postgres)"
 
-          if [ -n "$POSTGRES_CONTAINER" ]; then
-            POSTGRES_STATUS="$(docker inspect \
-              --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
-              "$POSTGRES_CONTAINER")"
+          POSTGRES_HEALTH="$(docker inspect \
+            --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
+            "$POSTGRES_CONTAINER")"
 
-            echo "PostgreSQL status: $POSTGRES_STATUS"
+          echo "PostgreSQL health: $POSTGRES_HEALTH"
 
-            if [ "$POSTGRES_STATUS" != "healthy" ]; then
-              echo "ERROR: PostgreSQL is not healthy"
-              docker logs --tail 100 "$POSTGRES_CONTAINER" || true
-              exit 1
-            fi
+          if [ "$POSTGRES_HEALTH" != "healthy" ]; then
+            echo "ERROR: PostgreSQL is not healthy"
+            docker logs --tail 100 "$POSTGRES_CONTAINER" || true
+            exit 1
           fi
 
-          echo
-          echo "=========================================="
-          echo "Deployment verification successful"
-          echo "=========================================="
-          REMOTE
+          CADDY_CONTAINER="$(docker compose \
+            --env-file .env \
+            -p gastro-api \
+            ps -q caddy)"
 
+          CADDY_STATUS="$(docker inspect \
+            --format '{{.State.Status}}' \
+            "$CADDY_CONTAINER")"
+
+          echo "Caddy status: $CADDY_STATUS"
+
+          if [ "$CADDY_STATUS" != "running" ]; then
+            echo "ERROR: Caddy is not running"
+            docker logs --tail 100 "$CADDY_CONTAINER" || true
+            exit 1
+          fi
+
+          echo "Deployment verification successful."
+          REMOTE

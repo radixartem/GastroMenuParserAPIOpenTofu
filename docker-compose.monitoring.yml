@@ -39,8 +39,8 @@ services:
       - grafana_data:/var/lib/grafana
       - ./ops/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
 
-    ports:
-      - "127.0.0.1:3000:3000"
+    expose:
+      - "3000"
 
     depends_on:
       - prometheus

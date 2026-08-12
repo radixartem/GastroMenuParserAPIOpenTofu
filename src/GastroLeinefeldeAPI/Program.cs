@@ -73,7 +73,7 @@ app.UseSwagger();
 app.UseSwaggerUI();
 
 app.UseHttpMetrics();
-app.UseMetricServer();
+app.MapMetrics();
 
 app.UseAuthorization();
 
@@ -94,4 +94,3 @@ app.MapHealthChecks(
 app.MapControllers();
 
 await app.RunAsync();
-

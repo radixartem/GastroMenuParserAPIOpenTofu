@@ -3,27 +3,73 @@ logging {
   format = "logfmt"
 }
 
+
+# ============================================================
+# Discover Docker containers
+# ============================================================
+
 discovery.docker "linux" {
   host = "unix:///var/run/docker.sock"
 }
 
+
+# ============================================================
+# Docker metadata -> Loki labels
+# ============================================================
+
 discovery.relabel "docker_logs" {
   targets = []
 
+  # Container name without leading "/".
   rule {
     source_labels = ["__meta_docker_container_name"]
     regex         = "/(.*)"
-    target_label  = "service_name"
+    target_label  = "container"
+    replacement   = "$1"
+  }
+
+  # Docker Compose project.
+  rule {
+    source_labels = [
+      "__meta_docker_container_label_com_docker_compose_project",
+    ]
+    target_label = "compose_project"
+  }
+
+  # Docker Compose service.
+  rule {
+    source_labels = [
+      "__meta_docker_container_label_com_docker_compose_service",
+    ]
+    target_label = "compose_service"
   }
 }
 
+
+# ============================================================
+# Read Docker logs
+# ============================================================
+
 loki.source.docker "default" {
-  host          = "unix:///var/run/docker.sock"
-  targets       = discovery.docker.linux.targets
-  labels        = { platform = "docker" }
+  host    = "unix:///var/run/docker.sock"
+  targets = discovery.docker.linux.targets
+
+  labels = {
+    platform = "docker",
+    host     = "gastro-server",
+  }
+
   relabel_rules = discovery.relabel.docker_logs.rules
-  forward_to    = [loki.write.local.receiver]
+
+  forward_to = [
+    loki.write.local.receiver,
+  ]
 }
+
+
+# ============================================================
+# Send logs to Loki
+# ============================================================
 
 loki.write "local" {
   endpoint {
